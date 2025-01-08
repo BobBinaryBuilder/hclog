@@ -1,0 +1,26 @@
+[package]
+name = "hclog_macros"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.65.0"
+authors = ["Steffen Bohr <bohr@strato.de>"]
+license-file = "../LICENSE"
+description = "A simple derive macro for crate hclog"
+keywords = ["macros", "proc-macros"]
+categories = ["developer-tools::procedural-macros-helpers", "parsing"]
+documentation = "https://docs.rs/hclog_macros"
+repository = "https://github.com/ionos-cloud/hclog"
+readme = "README.md"
+
+
+[lib]
+name = "hclog_macros"
+proc-macro = true
+
+[dependencies]
+proc-macro2 = {version = "1", features = ["span-locations"]}
+quote = "1.0.33"
+syn = { version = "2.0.38", features = ["parsing", "extra-traits"]}
+
+[dev-dependencies]
+hclog = { path = "../hclog" }

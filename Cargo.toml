@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "hclog",
+    "hclog_macros",
+
+    # internal
+    "examples",
+    "benches",
+]
+
+[profile.bench.package.benches]
+debug = true
+strip = false
