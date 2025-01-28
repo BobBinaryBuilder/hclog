@@ -1,0 +1,6 @@
+target
+file.log
+Cargo.lock
+
+.cargo/config.toml
+.cargo/config
