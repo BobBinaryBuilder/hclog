@@ -10,202 +10,237 @@
     rustdoc::broken_intra_doc_links,
 )]
 #![doc(test(
-    //no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 #![cfg_attr(docsrs, allow(unused_attributes))]
 
 //! A configurable logging library for Rust
 //!
-//! `hclog` is a logging library for Rust which is designed to be highly configurable and
-//! flexible. It is designed to be as flexible as possible and to be used in a wide range of
-//! underlying log backends. Customer of this this library can choose which log backend they
-//! want to use and how the log messages should be formatted.
+//! The `hclog` (highly configurable log) library for Rust is designed to be a highly configurable
+//! logging solution. Its primary goal is to offer a customizable logging backend that caters to
+//! individual user needs, providing detailed control over logging options.
+//! Users have the flexibility to select from a variety of logging backends, specify the information
+//! included in log messages, and choose the desired module or logging level.
 //!
-//! # Design of the crate
+//! # Idea of this crate
 //!
-//! The crate uses a modular approach. Most of the implementation decisions are based on actual
-//! needs we had durring the implementation.
-//! The Logging is based on [`LogKey`] identifiers. Each `LogKey` is a unique identifier for a
-//! which exists within a [`Scope`]. The `Scope` is a container for a set of `LogKey`s and
+//! Existing log crates often provide a limited set of logging levels, such as `error`, `info`, and
+//! `debug`. While this may be sufficient for smaller applications, larger applications - especially
+//! those with modularized environments - require more precise control over logging output. In a
+//! modularized environment, different components like the GUI, network stack and storage subsystem
+//! generate log events, making it challenging to manage and analyze logs.
+//! A limited set of logging levels can lead to inaccurate, misleading or a massive amount of log
+//! messages which are not helpful for debugging or monitoring. A more fine-grained control over
+//! the desired log level can increase the quality of the log messages and reduce the comlexity of
+//! the log output.
 //!
-//! # Key based logging
+//! hclog is designed to address this issue(s) by providing fine-grained control over logging
+//! output. Each module has it's own scope with its own LogKeys, which can be configured and
+//! addressed individually.
+//! This allows developers to tailor logging settings to specific components, ensuring that log
+//! events are accurate, informative, and actionable. For example, a web application might define
+//! separate scopes for its web server, database, and authentication modules, each with its own
+//! logging configuration.
 //!
-//! The main idea of this library is to provide a key based logging system. A `LogKey` is a
-//! unique identifier for a logger or, to be precise, a lock backend. Each LogKey can be configured
-//! on his own with a dedicated [`Level`] and [`FacadeVariant`].
-//! To prevent identifier collisions in different crates or modules the `LogKey` are in a scope,
-//! which is a namespace or container.
+//! # Concept of this crate
 //!
-//! An Application, which links to different libraries, defines its own set of `LogKey` set. The
-//! linked libraries aswell. All of them are stored in a seperated scope. This may look like this:
+//! This library's core concept is a key-based logging system, where each logger or logging backend
+//! is uniquely identified by a [`LogKey`]. Each LogKey can be individually configured with its own
+//! logging [`Level`] and facade variant [`FacadeVariant`].
+//!
+//! To avoid naming conflicts between different modules or crates, `LogKey`s are organized within a
+//! scope, which serves as a namespace or container. When an application integrates multiple
+//! libraries, each defines its own set of LogKeys, which are stored within separate scopes.
+//! This hierarchical structure allows for organized and collision-free logging management.
+//! Each `LogKey` is a unique identifier  which can be configured on his own. Note that all
+//! identifiers should be exclusive to the scope and not be used in any other scopes.
+//!
+//! Assume a sample application with three modules A, B and C that look like this:
 //!
 //! ```none
 //! +---------------+
 //! |  Application  |
 //! +-------+-------+
 //!         |
-//!         |     +---+---+ +---+---+ +---+---+       +---+---+
-//!         +-----+ Lib A +-+ Lib B +-+ Lib C +-[...]-+  Lib  |
-//!         |     +---+---+ +---+---+ +---+---+       +---+---+
-//!         |         |         |         |               |
-//! +-------+---------+---------+---------+---------------+-------+
-//! | AppScopeKey | LibScopeA | LibScopeB | LibScopeC | LibScopeN |
-//! +-------------+-----------+-----------+-----------+-----------+
-//! | LogKeyA     | LogKeyA   | LogKeyA   | LogKeyA   | LogKeyA   |
-//! | LogKeyB     | LogKeyB   | LogKeyB   | LogKeyB   | LogKeyB   |
-//! | LogKeyC     | LogKeyC   | LogKeyC   | LogKeyC   | LogKeyC   |
-//! | LogKeyD     | LogKeyD   | LogKeyD   | LogKeyD   | LogKeyD   |
-//! +---------------------------+---------------------------------+
+//!         |        +---+---+    +---+---+    +---+---+
+//!         +--------+ Mod A +----+ Mod B +----+ Mod C +
+//!         |        +---+---+    +---+---+    +---+---+
+//!         |            |            |            |
+//! +-------+------------+------------+------------+-----+
+//! | App Scope   | ModA Scope | ModB Scope | ModC Scope |
+//! +-------------+------------+------------+------------+
+//! | AA          | MAA        | MBA        | MCA        |
+//! | AB          | MAB        | MBB        | MCB        |
+//! | AC          | MAC        | MBC        | MCC        |
+//! | AD          | MAD        | MBC        | MCD        |
+//! +----------------------------------------------------+
 //! ```
-//!
-//! Whereas every LogKey can implement its own logging backend and [`Options`] how and where should
-//! be logged to.
+//! The usage and examples below show how a sample imlementation of this structure could look like.
 //!
 //! # Usage
 //!
-//! The basic usage of this library is to define a set of `LogKey`s which are used to log messages
-//! in the application or library via defined macros like [`lI!`], [`lD1!`], [`lE!`] and so on. A
-//! logging  macro expects a `LogKey` and a format string similar to common `print!` macros like
-//! this:
+//! The basic logging functionality is provided by the [`lI!`], [`lD1!`], [`lE!`] and so on macros.
+//! These macros expect a `LogKey` - as defined on initialization - and a format string similar to
+//! common `print!` macros in rust. The `LogKey` is used to identify the logger and the format
+//! string is the message to be printed. Taken the App Scope from the example above the minimal
+//! usage would look like this:
+//!
 //! ```rust
+//! # use hclog::Level;
 //! # use hclog_macros::HCLog;
 //! # #[derive(HCLog, Copy, Clone)]
-//! # enum Keys { Key }
-//! # Keys::init_with_defaults("Keys").unwrap();
-//! # use Keys::Key;
-//!
-//! hclog::lI!(Key, "This is an info message");
-//! hclog::lD5!(Key, "This is a debug message with level {}", 5);
+//! # enum AppScope { AA, AB, AC, AD }
+//! # AppScope::init_with_defaults("Keys").unwrap();
+//! # use AppScope::*;
+//! hclog::lI!(AA, "This is an info message");
+//! hclog::lD5!(AB, "This is a debug message with level {}", Level::Debug5);
 //! ```
 //! Avoid writing expressions with side-effects in log statements. They may not be evaluated.
 //!
 //! ## In Libraries
 //!
-//! Libraries define their own set of [`LogKey`]s which are used to log messages within this Library.
-//! The initialization of the library is done by the application which uses the library via a common
-//! `init` function which calls the hclog initialization function.
+//! The example above just shows the basic usage of the logging macros without the actual
+//! initialization of those keys. The following example shows how to initialize the library and
+//! define the `LogKey`s for the `ModA` library:
 //!
 //! ```
 //! use hclog::{Scope, LogKey, Level, FacadeVariant, options::Options, Result};
 //!
 //! #[derive(Copy, Clone, Debug)]
-//! enum LibraryLogKeys {
-//!  LA,
-//!  LB,
-//!  LC,
-//!  // ... more keys
+//! enum ModAKeys {
+//!  MAA,
+//!  MAB,
+//!  MAC,
+//!  MAD,
 //! }
-//! use LibraryLogKeys::*;
+//! use ModAKeys::*;
 //!
-//! impl std::fmt::Display for LibraryLogKeys {
+//! impl std::fmt::Display for ModAKeys {
 //!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 //!         write!(f, "{}", match self {
-//!             Self::LA => "LA",
-//!             Self::LB => "LB",
-//!             Self::LC => "LC",
+//!             Self::MAA => "MAA",
+//!             Self::MAB => "MAB",
+//!             Self::MAC => "MAC",
+//!             Self::MAD => "MAD",
 //!         })
 //!     }
 //! }
 //!
-//! impl Scope for LibraryLogKeys {
+//! impl Scope for ModAKeys {
 //!     fn default_level() -> Level { Level::Info }
 //!     fn init<S: std::fmt::Display>(
 //!         name: S, level: Level, facade: FacadeVariant, options: Options
 //!     ) -> Result<()> {
 //!         hclog::init::<Self, S>(name, level, facade, options)?;
-//!         hclog::add_submodules(&[Self::LA, Self::LB, Self::LC])
+//!         hclog::add_submodules(&[Self::MAA, Self::MAB, Self::MAC, Self::MAD])
 //!     }
 //! }
 //!
-//! impl LogKey for LibraryLogKeys {
+//! impl LogKey for ModAKeys {
 //!     fn log_key(&self) -> usize {
 //!         match self {
-//!             Self::LA => 0,
-//!             Self::LB => 1,
-//!             Self::LC => 2,
+//!             Self::MAA => 0,
+//!             Self::MAB => 1,
+//!             Self::MAC => 2,
+//!             Self::MAD => 3,
 //!         }
 //!     }
 //! }
 //!
 //! fn do_log() {
-//!     hclog::lI!(LA, "this is a info message in Library Scope");
+//!     hclog::lI!(MAA, "this is a info message in Library Scope");
+//!     hclog::LD10!(MAA, "this is a debug message in Library Scope");
 //! }
 //!
-//! fn init_mylibrary(level: Level, facade: FacadeVariant, options: Options) -> Result<()> {
+//! fn init_mod_a(level: Level, facade: FacadeVariant, options: Options) -> Result<()> {
 //!     /* main initialization part of the library */
-//!     LibraryLogKeys::init("MyLibrary", level, facade, options)?;
+//!     ModAKeys::init("ModA", level, facade, options)?;
 //!     Ok(())
 //! }
 //! ```
 //!
-//! The `LibraryLogKeys` are a defined [`LogKey`] set of the library and does not need to be
-//! visible to the application nor is intended to be used by the application. Keys defined in the
-//! library should be exclusive to the library and not be used in the application.
+//! The `LogKey`s are defined as an enum implementing the `LogKey` and `Scope` traits. Implementing
+//! the `Scope` trait is necessary to initialize the library - if not already done - and also
+//! creates the namespace for this set of `LogKey`s. The `LogKey` trait is used to define the
+//! unique identifier for the loggers in this scope.
+//! Additionally, the `Display` trait is required - as a bound by [`LogKey`] - to display the name
+//! in the log output.
 //!
 //! ## In Applications/executables
 //!
-//! Applications or executables also define their own set of [`LogKey`]s which are used to log
-//! messages within the scope of the application. The initialization of the application is done
-//! by calling the `init` function of the [`Scope`] implementation of the [`LogKey`] type.
-//! The application can also initialize the loggers of the libraries it uses.
+//! Taking the example above a sample application could look like this:
 //!
 //! _Note: The example below uses the same [`Level`] and [`FacadeVariant`] for the application
 //! and the libraries. This is not necessary and can be configured individually._
 //!
-//! Taking the example above a sample application could look like this:
 //!
 //! ```
 //! use hclog::{Scope, LogKey, Level, FacadeVariant, options::Options, Result};
-//! // use mylibrary;  // import the 'library' above
+//! // use moda;  // import the 'module' above
 //!
 //! #[derive(Copy, Clone, Debug)]
-//! enum AppLogKeys {
+//! enum AppKeys {
 //!    AA,
 //!    AB,
 //!    AC,
+//!    AD,
 //! }
-//! use AppLogKeys::*;
+//! use AppKeys::*;
 //!
-//! impl std::fmt::Display for AppLogKeys {
+//! impl std::fmt::Display for AppKeys {
 //!    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 //!         write!(f, "{}", match self {
 //!             Self::AA => "AA",
 //!             Self::AB => "AB",
 //!             Self::AC => "AC",
+//!             Self::AD => "AD",
 //!         })
 //!     }
 //! }
 //!
-//! impl Scope for AppLogKeys {
+//! impl Scope for AppKeys {
 //!     fn init<S: std::fmt::Display>(
 //!         name: S, level: Level, facade: FacadeVariant, options: Options
 //!     ) -> Result<()> {
 //!         hclog::init::<Self, S>(name, level, facade, options)?;
 //!         hclog::add_submodules(&[Self::AA, Self::AB, Self::AC])?;
 //!         // call initialization routine in the library
-//!         // mylibrary::init_mylibrary(level, facade, options)?;
+//!         // moda::init_mod_a(level, facade, options)?;
 //!         Ok(())
 //!     }
 //! }
 //!
-//! impl LogKey for AppLogKeys {
+//! impl LogKey for AppKeys {
 //!     fn log_key(&self) -> usize {
 //!         match self {
 //!             Self::AA => 0,
 //!             Self::AB => 1,
 //!             Self::AC => 2,
+//!             Self::AD => 3,
 //!         }
 //!     }
 //! }
 //!
 //! fn main() {
-//!    AppLogKeys::init("MyApp", Level::Debug1, FacadeVariant::StdOut, Options::default()).unwrap();
+//!    AppKeys::init("MyApp", Level::Debug1, FacadeVariant::StdOut, Options::default()).unwrap();
 //!
-//!    // mylibrary::do_log();     // logs in the scope of the library
+//!    // moda::do_log();     // logs in the scope of the library
 //!    hclog::lI!(AA, "this is a info message in App Scope");
 //! }
 //! ```
+//! Applications or executables also define their own set of [`LogKey`]s which are used to log
+//! messages within the scope of the application. The initialization of the application is done
+//! by calling the `init` function of the [`Scope`] implementation of the [`LogKey`] type.
+//! The application can also initialize the loggers of the libraries it uses.
+//!
+//! If a user of this Application wants to get just the logging output of librarys `ModA` LogKey
+//! `MAA` he can either initialize the library with a desired level and disable logging in the
+//! application or provide a commandline option to filter the output of the application which might
+//! look like this:
+//! ```
+//! [foo ~]# ./myapp -l "MAA:debug1"
+//! ```
+//! This would print the `lI!` message in the library but not the `lD10!` message.
 //!
 //! ## Usage with crate `hclog_macros`
 //!
@@ -220,24 +255,25 @@
 //!
 //! #[derive(HCLog, Copy, Clone)]
 //! #[hclog(default_level = Level::Info, default_facade = FacadeVariant::StdOut)]
-//! enum MyLogKeys {
+//! enum ModBKeys {
 //!   #[hclog(name = "A", level = Level::Debug1)]
-//!   DA,
+//!   MBA,
 //!   #[hclog(name = "B", facade = FacadeVariant::StdErr)]
-//!   DB,
+//!   MBB,
 //!   #[hclog(name = "C")]
-//!   DC,
+//!   MBC,
+//!   #[hclog(name = "D")]
+//!   MBD,
 //! }
 //!
-//! use MyLogKeys::*;
+//! use ModBKeys::*;
 //!
 //! fn main() {
-//!    MyLogKeys::init_with_defaults("MyLogKeys").unwrap();
-//!    hclog::lD1!(DB, "this won't get logged because of lvl Info for Key DB");
-//!    hclog::lD1!(DA, "this will get logged because of lvl Debug1 for Key DA");
-//!    hclog::lE!(DB, "this will be logged to stderr");
+//!    ModBKeys::init_with_defaults("MyLogKeys").unwrap();
+//!    hclog::lD1!(MBB, "this won't get logged because of lvl Info for Key DB");
+//!    hclog::lD1!(MBA, "this will get logged because of lvl Debug1 for Key DA");
+//!    hclog::lE!(MBB, "this will be logged to stderr");
 //! }
-//!
 //! ```
 //!
 //! # Warning
