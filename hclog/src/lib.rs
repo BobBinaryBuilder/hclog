@@ -31,12 +31,12 @@
 //! generate log events, making it challenging to manage and analyze logs.
 //! A limited set of logging levels can lead to inaccurate, misleading or a massive amount of log
 //! messages which are not helpful for debugging or monitoring. A more fine-grained control over
-//! the desired log level can increase the quality of the log messages and reduce the comlexity of
+//! the desired log level can increase the quality of the log messages and reduce the complexity of
 //! the log output.
 //!
 //! hclog is designed to address this issue(s) by providing fine-grained control over logging
 //! output. Each module has it's own scope with its own LogKeys, which can be configured and
-//! addressed individually.
+//! turned on and off individually.
 //! This allows developers to tailor logging settings to specific components, ensuring that log
 //! events are accurate, informative, and actionable. For example, a web application might define
 //! separate scopes for its web server, database, and authentication modules, each with its own
@@ -244,9 +244,9 @@
 //!
 //! ## Usage with crate `hclog_macros`
 //!
-//! The `hclog_macros` crate provides a attributable derive macro for the usage with this crate.
+//! The `hclog_macros` crate provides an attributable derive macro for the usage with this crate.
 //! It allows you to derive all traits necessary to initialize the library and configure default
-//! values at compiletime.
+//! values at compile time.
 //! For more informations consult the documentation of the `hclog_macros` crate.
 //!
 //! ```rust
